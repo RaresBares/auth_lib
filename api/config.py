@@ -5,7 +5,7 @@ import os
 # Standardwerte, z.B. über Umgebungsvariablen überschreibbar
 database_url: str = os.getenv(
     "DATABASE_URL",
-    "postgresql+asyncpg://user:pass@auth_db:5432/appdb",
+    "postgresql+asyncpg://user:pass@auth_db:5432/appdb", #TODO: Make allgemein
 )
 
 
