@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 from sqlalchemy import select
-from fastapi import HTTPException, status, Depends
+from fastapi import HTTPException, status, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,9 +13,18 @@ from api import config
 
 bearer = HTTPBearer(auto_error=False)
 
+ACCESS_COOKIE_NAME = "access_token"
+
 
 def token_from_creds(creds: HTTPAuthorizationCredentials | None) -> str:
     return creds.credentials if creds else ""
+
+
+def token_from_cookie(request: Request, name: str = ACCESS_COOKIE_NAME) -> str:
+    try:
+        return request.cookies.get(name, "") or ""
+    except Exception:
+        return ""
 
 
 def authenticated(access_token: str) -> bool:
@@ -39,7 +48,7 @@ def is_admin(access_token: str) -> bool:
         decoded = decode_token(access_token)
     except Exception:
         return False
-    return decoded.get("admin") == "true"
+    return bool(decoded.get("admin"))
 
 
 def get_user_id(access_token: str) -> str | None:
@@ -52,10 +61,11 @@ def get_user_id(access_token: str) -> str | None:
 
 def RequireUser():
     async def dependency(
+        request: Request,
         creds: HTTPAuthorizationCredentials | None = Depends(bearer),
         db: AsyncSession = Depends(get_db),
     ) -> User:
-        access_token = token_from_creds(creds)
+        access_token = token_from_creds(creds) or token_from_cookie(request)
 
         if not authenticated(access_token):
             raise HTTPException(
