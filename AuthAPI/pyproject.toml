@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "auth-toolbox"
+version = "0.1.0"
+description = "FastAPI auth toolbox (JWT + optional auth DB lookup) with RequireUser/RequireAdminUser."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Rares Sahleanu" }]
+dependencies = [
+  "fastapi>=0.110",
+  "sqlalchemy>=2.0",
+  "asyncpg>=0.28",
+  "python-jose[cryptography]>=3.3",
+  "passlib[bcrypt]>=1.7.4",
+]
+
+[tool.setuptools]
+package-dir = {"" = "."}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["auth_toolbox*"]
+exclude = ["tests*"]
