@@ -4,6 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Optional, Type
+from pydantic import BaseModel
+from pydantic.config import ConfigDict
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -109,6 +111,26 @@ def _uid_from_claims(claims: dict[str, Any]) -> int:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid user")
 
 
+
+class UserOut(BaseModel):
+    id: int
+    email: str
+    first_name: str
+    last_name: str
+    username: str | None
+    is_active: bool
+    admin: bool
+    newsletter: bool
+    created_at: datetime | None = None
+    company: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+def _safe_user_obj(obj: Any) -> UserOut:
+    return UserOut.model_validate(obj)
+
+
 async def _db_session_dep() -> AsyncSession:
     _req_init()
     _req_db()
@@ -174,14 +196,14 @@ class API:
 def RequireUser(data: bool = False):
     _req_init()
 
-    if data:
+    if _STATE.use_db:
         _req_db()
 
         async def dependency(
             request: Request,
             creds: HTTPAuthorizationCredentials | None = Depends(_STATE.bearer),
             db: AsyncSession = Depends(_db_session_dep),
-        ):
+        ) -> UserOut:
             token = _token_from_creds(creds) or _token_from_cookie(request)
 
             if not _authenticated(token):
@@ -197,7 +219,7 @@ def RequireUser(data: bool = False):
             if not obj:
                 raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="user not found")
 
-            return obj
+            return _safe_user_obj(obj)
 
         return dependency
 
