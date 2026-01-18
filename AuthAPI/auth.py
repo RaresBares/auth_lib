@@ -25,7 +25,6 @@ class TokenUser:
 class _State:
     initialized: bool = False
     bearer: HTTPBearer
-    login_url: str
     access_cookie_name: str
     use_db: bool = False
     sessionmaker: Optional[async_sessionmaker[AsyncSession]] = None
@@ -64,11 +63,10 @@ def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _redirect_unauth() -> None:
+def _unauthorized(detail: str = "unauthorized") -> None:
     raise HTTPException(
-        status_code=status.HTTP_303_SEE_OTHER,
-        detail="invalid auth token",
-        headers={"Location": _STATE.login_url},
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail=detail,
     )
 
 
@@ -128,7 +126,6 @@ class API:
         access_minutes: int,
         refresh_days: int,
         bcrypt_rounds: int,
-        login_url: str,
         access_cookie_name: str = "access_token",
         bearer: Optional[HTTPBearer] = None,
         use_db: bool = True,
@@ -139,8 +136,6 @@ class API:
         user_id_attr: str = "id",
         admin_attr: str = "admin",
     ) -> None:
-        if not login_url:
-            raise RuntimeError("API.init: login_url required")
 
         security.init_security(
             secret_key=secret_key,
@@ -150,7 +145,6 @@ class API:
             bcrypt_rounds=bcrypt_rounds,
         )
 
-        _STATE.login_url = login_url
         _STATE.access_cookie_name = access_cookie_name or "access_token"
         _STATE.bearer = bearer or HTTPBearer(auto_error=False)
 
@@ -191,7 +185,7 @@ def RequireUser(data: bool = False):
             token = _token_from_creds(creds) or _token_from_cookie(request)
 
             if not _authenticated(token):
-                _redirect_unauth()
+                _unauthorized("invalid auth token")
 
             claims = _claims_or_401(token)
             uid = _uid_from_claims(claims)
@@ -214,7 +208,7 @@ def RequireUser(data: bool = False):
         token = _token_from_creds(creds) or _token_from_cookie(request)
 
         if not _authenticated(token):
-            _redirect_unauth()
+            _unauthorized("invalid auth token")
 
         claims = _claims_or_401(token)
         uid = _uid_from_claims(claims)
