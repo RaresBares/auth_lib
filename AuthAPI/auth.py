@@ -1,3 +1,4 @@
+# AuthAPI/auth.py
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -7,9 +8,11 @@ from typing import Any, Optional, Type
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from . import security
+from .db import init_db, dispose_engine
+from .db_models import User
 
 
 @dataclass(frozen=True)
@@ -21,16 +24,11 @@ class TokenUser:
 
 class _State:
     initialized: bool = False
-
     bearer: HTTPBearer
     login_url: str
     access_cookie_name: str
-
     use_db: bool = False
-    db_url: Optional[str] = None
-    engine: Any = None
     sessionmaker: Optional[async_sessionmaker[AsyncSession]] = None
-
     user_model: Optional[Type[Any]] = None
     user_id_attr: str = "id"
     admin_attr: str = "admin"
@@ -39,20 +37,16 @@ class _State:
 _STATE = _State()
 
 
-def _require_init() -> None:
+def _req_init() -> None:
     if not _STATE.initialized:
-        raise RuntimeError("auth toolbox not initialized: call API.init(...) at startup")
+        raise RuntimeError("AuthAPI not initialized: call API.init(...) at startup")
 
 
-def _require_db() -> None:
+def _req_db() -> None:
     if not _STATE.use_db:
-        raise RuntimeError("auth DB disabled (init(..., use_db=True, ...))")
+        raise RuntimeError("auth DB disabled (API.init(use_db=True, ...))")
     if _STATE.sessionmaker is None or _STATE.user_model is None:
-        raise RuntimeError("auth DB enabled but not configured (missing db_url/user_model)")
-
-
-def _now_utc() -> datetime:
-    return datetime.now(timezone.utc)
+        raise RuntimeError("auth DB enabled but not configured")
 
 
 def _token_from_creds(creds: HTTPAuthorizationCredentials | None) -> str:
@@ -64,6 +58,10 @@ def _token_from_cookie(request: Request) -> str:
         return request.cookies.get(_STATE.access_cookie_name, "") or ""
     except Exception:
         return ""
+
+
+def _now_utc() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def _redirect_unauth() -> None:
@@ -114,8 +112,8 @@ def _uid_from_claims(claims: dict[str, Any]) -> int:
 
 
 async def _db_session_dep() -> AsyncSession:
-    _require_init()
-    _require_db()
+    _req_init()
+    _req_db()
     SessionLocal = _STATE.sessionmaker
     async with SessionLocal() as session:
         yield session
@@ -125,24 +123,21 @@ class API:
     @staticmethod
     def init(
         *,
-        # Security config (NO ENV)
         secret_key: str,
         algorithm: str,
         access_minutes: int,
         refresh_days: int,
         bcrypt_rounds: int,
-        # HTTP
         login_url: str,
         access_cookie_name: str = "access_token",
         bearer: Optional[HTTPBearer] = None,
-        # DB (optional)
-        use_db: bool = False,
-        db_url: Optional[str] = None,
-        user_model: Optional[Type[Any]] = None,
+        use_db: bool = True,
+        database_url: Optional[str] = None,
+        engine_kwargs: Optional[dict[str, Any]] = None,
+        session_kwargs: Optional[dict[str, Any]] = None,
+        user_model: Type[Any] = User,
         user_id_attr: str = "id",
         admin_attr: str = "admin",
-        engine_kwargs: Optional[dict[str, Any]] = None,
-        sessionmaker_kwargs: Optional[dict[str, Any]] = None,
     ) -> None:
         if not login_url:
             raise RuntimeError("API.init: login_url required")
@@ -165,46 +160,28 @@ class API:
         _STATE.admin_attr = admin_attr
 
         if _STATE.use_db:
-            if not db_url:
-                raise RuntimeError("API.init: use_db=True requires db_url")
-            if user_model is None:
-                raise RuntimeError("API.init: use_db=True requires user_model")
-
-            ekw = {"pool_pre_ping": True}
-            if engine_kwargs:
-                ekw.update(engine_kwargs)
-
-            engine = create_async_engine(db_url, **ekw)
-
-            smkw = {"expire_on_commit": False}
-            if sessionmaker_kwargs:
-                smkw.update(sessionmaker_kwargs)
-
-            SessionLocal = async_sessionmaker(engine, **smkw)
-
-            _STATE.db_url = db_url
-            _STATE.engine = engine
+            if not database_url:
+                raise RuntimeError("API.init: use_db=True requires database_url")
+            init_db(database_url=database_url, engine_kwargs=engine_kwargs, session_kwargs=session_kwargs)
+            from .db import _SessionLocal as SessionLocal  # type: ignore
+            if SessionLocal is None:
+                raise RuntimeError("db init failed")
             _STATE.sessionmaker = SessionLocal
         else:
-            _STATE.db_url = None
-            _STATE.engine = None
             _STATE.sessionmaker = None
 
         _STATE.initialized = True
 
     @staticmethod
     async def close() -> None:
-        if _STATE.engine is not None:
-            await _STATE.engine.dispose()
-        _STATE.engine = None
-        _STATE.sessionmaker = None
+        await dispose_engine()
 
 
 def RequireUser(data: bool = False):
-    _require_init()
+    _req_init()
 
     if data:
-        _require_db()
+        _req_db()
 
         async def dependency(
             request: Request,
