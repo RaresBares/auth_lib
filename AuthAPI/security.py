@@ -51,18 +51,33 @@ def token_hash(token: str) -> str:
     return hashlib.sha256((token or "").encode("utf-8")).hexdigest()
 
 
+def _normalize_password(password: str) -> str:
+    """Make bcrypt-safe input for long passwords.
+
+    bcrypt only considers the first 72 bytes. For longer UTF-8 passwords we
+    pre-hash to a fixed-length ASCII string so verification remains stable.
+    """
+    p = password or ""
+    b = p.encode("utf-8")
+    if len(b) <= 72:
+        return p
+    return hashlib.sha256(b).hexdigest()
+
+
 def hash_password(password: str) -> str:
     _req()
     if not password:
         raise ValueError("empty password")
-    return _STATE.pwd.hash(password)  # type: ignore[union-attr]
+    pw = _normalize_password(password)
+    return _STATE.pwd.hash(pw)  # type: ignore[union-attr]
 
 
 def verify_password(password: str, hashed_password: str) -> bool:
     _req()
     if not password or not hashed_password:
         return False
-    return bool(_STATE.pwd.verify(password, hashed_password))  # type: ignore[union-attr]
+    pw = _normalize_password(password)
+    return bool(_STATE.pwd.verify(pw, hashed_password))  # type: ignore[union-attr]
 
 
 def decode_token(token: str) -> dict[str, Any]:
